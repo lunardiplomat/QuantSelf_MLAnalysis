@@ -1,0 +1,124 @@
+---
+title: "QuantSelf"
+author: "lunardiplomat"
+date: "2022-10-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Using...
+```{r}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(knitr)
+library(RColorBrewer)
+library(rattle)
+```
+
+# Overview
+
+The following analysis was performed using data from various fitness tech devices, such as Jawbone Up, Nike Fuelband, and Fitbit. These devices have made the collection of data pertaining to one's activities simple and relatively cheap, but one thing they don't customarily record is how *well* the user is performing a given action. The purpose of this analysis is to try to determine if a machine learning algorithm can deduce *quality* from *quantity*.  Specifically we want to take the data and use a machine learning model to try to predict the manner in which a given excercise was performed for 20 test cases.  This wouldn't be possible without data from:
+
+<http://groupware.les.inf.puc-rio.br/har>
+
+and the organization was very kind for lending its data to data scientists for this purpose.
+
+## Importing
+```{r}
+train<- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+test<- read.csv("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+```
+
+## Cleaning
+
+Cleaning the data by removing columns which contain NA values.  (In this particular dataset each column was either all NA values or none)
+
+```{r}
+set.seed(789)
+paredTrain<- train[,colSums(is.na(train))==0]
+paredTest<-  test[,colSums(is.na(test))==0]
+dim(paredTrain)
+dim(paredTest)
+```
+
+## Pre-Processing
+The first thing we almost always do in machine learning pre-processing is split the data into a training and validation set using the 'createDataPartition' function
+
+EDIT: an error was recieved stating that the function could not be performed because the data was too long.  Since the first few columns of our data are irrelevant to our predictive goal, we are going to go ahead and remove them outright.
+
+
+```{r}
+paredTrain<- paredTrain[,-c(1:7)]
+paredTest<- paredTest[-c(1:7)]
+
+set.seed(789)
+part<- createDataPartition(paredTrain$classe, p=0.7, list=FALSE)
+trainSet<- paredTrain[part,]
+testSet<- paredTrain[-part,]
+```
+
+Remove variables with low variance and split set...
+
+```{r}
+nzv<- nearZeroVar(trainSet)
+trainSet<- trainSet[,-nzv]
+testSet<- testSet[,-nzv]
+
+dim(trainSet)
+dim(testSet)
+```
+
+As we can see, the new dimension of this dataset is 19622 rows and 59 variables.  59 variables is a good start in narrowing down those which we may find predictive value in.  
+
+## Model 1: Decision/Classification Trees
+
+```{r}
+set.seed(789)
+decisionTree<- rpart(classe ~ ., data=trainSet, method="class")
+fancyRpartPlot(decisionTree)
+```
+
+This is what the schema for our decision tree looks like.  One can observe that at every juncture branches are formed where a potentially actionable piece of information is parsed.
+
+```{r}
+predictionModel<- predict(decisionTree, testSet, type="class")
+confusionMatrix(predictionModel, as.factor(testSet$classe))
+```
+
+As we can see from the accuracy value under "Overall Statistics" our accuracy in prediction was about 70% meaning that our out of sample error rate is about 30%.  
+
+Let's apply another model in an effort to boost our predictive accuracy
+
+## Model 2: Random Forest
+
+The first thing we're going to do is specify the parameters of our training process.  We'll do this by making use of the 'trainControl' function and then we'll use those parameters to construct our model.
+
+```{r}
+trainCtrl<- trainControl(method='cv', number=3, verboseIter=FALSE)
+rf<- train(classe ~ ., data=trainSet, method="rf", trControl=trainCtrl)
+rf$finalModel
+```
+
+Now it's time to use this model we've created in order to gauge it's predictive power on the validation set
+
+```{r}
+rfPredict<- predict(rf, newdata=testSet)
+confusionMatrix(rfPredict, as.factor(testSet$classe))
+plot(rf)
+```
+
+As we can see the accuracy of the random forest model is very high.  Our overall statistics put the accuracy at 0.9954 making our out of sample error infinitesimal.  However this doesn't mean our model should be declared the gold standard, there is the possibility that our model was biased somewhere along the process to overfit our validation set. 
+
+The best way for us to find out would be to go ahead and apply the model which seems to have superior predictive power (the random forest) to the validation data.  (Note: This validation data is distinct from the test set we used to train our models, the data we're using in the upcoming line of code is data that we've intentionally not given our models any access to in order to remove the possibility for bias)
+
+## Final Prediction...
+
+```{r}
+predict(rf, newdata=paredTest)
+```
+
